@@ -79,20 +79,104 @@ export function useTodo() {
     }, [connection, anchorWallet])
 
     useEffect(() => {
+        const findProfileAccounts = async () => {
+            if(program && publicKey && !transactionPending) {
+                try {
+                    setLoading(true)
+                    const [profilePda, profileBump] = await findProgramAddressSync([utf8.encode('USER_STATE'), publicKey.toBuffer()], program.programId)
+                    const profileAccount = await program.account.userProfile.fetch(profilePda)
 
-        if(initialized) {
-            setTodos(dummyTodos)
+                    if(profileAccount) {
+                        setLastTodo(profileAccount.lastTodo)
+                        setInitialized(true)
+
+                        const todoAccounts = await program.account.todoAccount.all([authorFilter(publicKey.toString())])
+                        setTodos(todoAccounts)
+                    } else {
+                        console.log("Not yet initialized")
+                        setInitialized(false)
+                    }
+                } catch (error) {
+                    console.log(error)
+                    setInitialized(false)
+                    setTodos([])
+                } finally {
+                    setLoading(false)
+                }
+            }
         }
+        
+        findProfileAccounts()
 
-
-    }, [initialized])
+    }, [publicKey, program, transactionPending])
 
     const handleChange = (e)=> {
         setInput(e.target.value)
     }
   
+    const initializeUser = async () => {
+        // Check if the program exist and wallet is connected
+        if(program && publicKey) {
+            try {
+                setTransactionPending(true)
+                const [profilePda, profileBump] = findProgramAddressSync([utf8.encode('USER_STATE'), publicKey.toBuffer()], program.programId)
+
+                const tx =  await program.methods
+                    .initializeUser()
+                    .accounts({
+                        userProfile: profilePda,
+                        authority: publicKey,
+                        systemProgram: SystemProgram.programId,
+                    })
+                    .rpc()
+
+                setInitialized(true)
+                toast.success('Successfully Initialized')
+            } catch (error) {
+                console.log(error)
+                toast.error(error.toString())
+            } finally {
+                setTransactionPending(false)
+            }
+        }
+        // then run initializeUser() from program(smart contract)
+
+    }
+
     const initializeStaticUser = () => {
         setInitialized(true)
+    }
+
+    const addTodo = async (e) => {
+        e.preventDefault()
+
+        if(program && publicKey) {
+            try {
+                setTransactionPending(true)
+                const [profilePda, profileBump] = findProgramAddressSync([utf8.encode('USER_STATE'), publicKey.toBuffer()], program.programId)
+                const [todoPda, tdoBump] = findProgramAddressSync([utf8.encode('TODO_STATE'), publicKey.toBuffer(), Uint8Array.from([lastTodo])], program.programId)
+
+                if(input) {
+                    await program.methods
+                        .addTodo(input)
+                        .accounts({
+                            userProfile: profilePda,
+                            todoAccount: todoPda,
+                            authority: publicKey,
+                            systemProgram: SystemProgram.programId
+                        })
+                        .rpc()
+                    toast.success('Successfully added todo.')
+                }
+            } catch(error) {
+                console.log(error)
+                toast.error(error.toString())
+            } finally {
+                setTransactionPending(false)
+                setInput("")
+
+            }
+        }
     }
 
     const addStaticTodo = (e) => {
@@ -107,6 +191,34 @@ export function useTodo() {
             }
             setTodos([newTodo,...todos])
             setInput("")
+        }
+    }
+
+    const markTodo = async (todoPda, todoIdx) => {
+        if (program && publicKey) {
+            try {
+                setTransactionPending(true)
+                setLoading(true)
+                const [profilePda, profileBump] = findProgramAddressSync([utf8.encode('USER_STATE'), publicKey.toBuffer()], program.programId)
+
+                await program.methods
+                    .markTodo(todoIdx)
+                    .accounts({
+                        userProfile: profilePda,
+                        todoAccount: todoPda,
+                        authority: publicKey,
+                        systemProgram: SystemProgram.programId,
+                    })
+                    .rpc()
+
+                toast.success("Successfully marked todo!")
+            } catch (error) {
+                console.log(error)
+                toast.error(error.toString())
+            } finally {
+                setLoading(false)
+                setTransactionPending(false)
+            }
         }
     }
 
@@ -130,6 +242,38 @@ export function useTodo() {
         )
     }
 
+    const removeTodo = async (todoPda, todoIdx) => {
+        if (program && publicKey) {
+
+            try {
+                setTransactionPending(true)
+                setLoading(true)
+    
+                const [profilePda, profileBump] = findProgramAddressSync([utf8.encode('USER_STATE'), publicKey.toBuffer()], program.programId)
+    
+                await program.methods
+                    .removeTodo(todoIdx)
+                    .accounts({
+                        userProfile: profilePda,
+                        todoAccount: todoPda,
+                        authority: publicKey,
+                        systemProgram: SystemProgram.programId
+                    })
+                    .rpc()
+    
+                toast.success('Successfully removed Todo!')
+            } catch(error) {
+                console.log(error)
+                toast.error(error.toString())
+            } finally {
+                setLoading(false)
+                setTransactionPending(false)
+            }
+
+            
+        }
+    }
+
     const removeStaticTodo = async (todoID) => {
         setTodos(
             todos.filter(todo => {
@@ -146,5 +290,5 @@ export function useTodo() {
     const incompleteTodos = useMemo(() => todos.filter((todo) => !todo.account.marked), [todos])
     const completedTodos = useMemo(() => todos.filter((todo) => todo.account.marked), [todos])
 
-    return { initialized, initializeStaticUser, loading, transactionPending, completedTodos, incompleteTodos, markStaticTodo, removeStaticTodo, addStaticTodo, input, setInput, handleChange }
+    return { initialized, initializeStaticUser, loading, transactionPending, completedTodos, incompleteTodos, markStaticTodo, removeStaticTodo, addStaticTodo, input, setInput, handleChange, initializeUser, addTodo, markTodo, removeTodo }
 }
